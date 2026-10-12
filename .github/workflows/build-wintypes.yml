@@ -1,0 +1,44 @@
+name: Build ARM64EC wintypes.dll
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Bison
+        run: brew install bison
+
+      - name: Install LLVM-MinGW
+        env:
+          LLVM_MINGW_SHA256: bd85a3975723815cef28dbbd2ca2cb0c926f6b348a12a0453f39f7af273cb3f7
+        run: |
+          archive="$RUNNER_TEMP/llvm-mingw.tar.xz"
+          curl --fail --location --retry 3 \
+            https://github.com/mstorsjo/llvm-mingw/releases/download/20260421/llvm-mingw-20260421-ucrt-macos-universal.tar.xz \
+            --output "$archive"
+          printf '%s  %s\n' "$LLVM_MINGW_SHA256" "$archive" | shasum --check
+          mkdir -p toolchains
+          tar -xJf "$archive" -C toolchains
+
+      - name: Build wintypes.dll
+        run: bash build/wine-pe/build-modules.sh wintypes
+
+      - name: Upload wintypes.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: Madeira-arm64ec-wintypes
+          path: app/Madeira/arm64ec-windows/wintypes.dll
+          if-no-files-found: error
+          retention-days: 14

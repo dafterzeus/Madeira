@@ -16,6 +16,8 @@
 #                                  modules import them)
 #   cryptsp                        Xal.Unity (Ori and the Will of the Wisps)
 #                                  delay-loads SystemFunction032 from it
+#   wintypes                       api-ms-win-core-winrt-robuffer-l1-1-0
+#                                  (Unity IL2CPP's GameAssembly.dll)
 #   xaudio2_7                      the prefix registers CLSID_XAudio2 (2.7) at
 #                                  system32\xaudio2_7.dll
 # Pass the tracked modules a change touches (kernelbase, shell32, xinput1_1 ...
@@ -40,7 +42,7 @@ STRIP="$TC/arm64ec-w64-mingw32-strip"
 case "${1:-}" in
     -h|--help) sed -n '2,/^set -eu/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
 esac
-[ $# -gt 0 ] || set -- cryptsp d3dx11_43 msvcp110 msvcr110 xaudio2_7
+[ $# -gt 0 ] || set -- cryptsp d3dx11_43 msvcp110 msvcr110 wintypes xaudio2_7
 [ -x "$STRIP" ] || { echo "llvm-mingw not found at $TC (docs/BUILDING.md)" >&2; exit 1; }
 
 targets=()
