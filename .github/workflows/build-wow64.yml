@@ -1,6 +1,9 @@
 name: Build pinned WoW64 PE assets
 on:
   workflow_dispatch:
+  push:
+    branches: [gta-build]
+    paths: [.github/workflows/build-wow64.yml]
 permissions:
   contents: read
 jobs:
