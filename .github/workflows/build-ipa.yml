@@ -4,8 +4,10 @@ name: Build Madeira main IPA
 'on':
   workflow_dispatch: null
   push:
-    branches: [gta-build]
-    paths: [.github/workflows/build-ipa.yml]
+    branches:
+    - gta-build
+    paths:
+    - .github/workflows/build-ipa.yml
 concurrency:
   group: madeira-main-ipa
   cancel-in-progress: false
@@ -126,13 +128,12 @@ jobs:
         cd wine
         mkdir -p build-native
         cd build-native
-        ../configure > "$GITHUB_WORKSPACE/wine-native-configure.log" 2>&1 || true
-        # Only the host tools and the generated headers are used from this
-        # tree. A full host build also compiles the iOS-only unix sources
-        # for macOS, and one failure there used to stop make before widl.
+        ../configure --disable-tests > "$GITHUB_WORKSPACE/wine-native-configure.log" 2>&1
         N=$(sysctl -n hw.ncpu)
-        { make -j"$N" __tools__ && make -j"$N" include; } > "$GITHUB_WORKSPACE/wine-native-make.log" 2>&1 \
-          || make -k -j"$N" >> "$GITHUB_WORKSPACE/wine-native-make.log" 2>&1 || true
+        # Never fall back to a full Wine build: only host tools and headers are needed.
+        make -j"$N" __tools__ > "$GITHUB_WORKSPACE/wine-native-make.log" 2>&1
+        make -k -j"$N" include >> "$GITHUB_WORKSPACE/wine-native-make.log" 2>&1 || true
+        test -x tools/widl/widl
     - name: Save native wine tools
       if: steps.winenative.outputs.cache-hit != 'true' && hashFiles('wine/build-native/tools/widl/widl') != ''
       uses: actions/cache/save@v4
@@ -435,9 +436,9 @@ jobs:
           exit 1
         fi
         echo "::notice::all 7 FEX archives present"
+      id: fexverify
     - name: Save FEX iOS build
-      if: steps.fexcache.outputs.cache-hit != 'true' && hashFiles('FEX/build-ios/FEXCore/Source/libFEXCore.a') !=
-        ''
+      if: steps.fexcache.outputs.cache-hit != 'true' && steps.fexverify.outcome == 'success'
       uses: actions/cache/save@v4
       with:
         path: FEX/build-ios
@@ -492,6 +493,7 @@ jobs:
           > "$GITHUB_WORKSPACE/llvm-ios-cfg.log" 2>&1
         cmake --build toolchains/llvm-ios-build -j"$(sysctl -n hw.ncpu)" \
           > "$GITHUB_WORKSPACE/llvm-ios-build.log" 2>&1
+      id: llvmbuild
     - name: Verify LLVM iOS build
       if: always()
       shell: bash
@@ -517,8 +519,7 @@ jobs:
           exit 1
         fi
     - name: Save LLVM 15.0.7 iOS build
-      if: steps.llvmcache.outputs.cache-hit != 'true' && hashFiles('toolchains/llvm-ios-build/lib/libLLVMCore.a')
-        != ''
+      if: steps.llvmcache.outputs.cache-hit != 'true' && steps.llvmbuild.outcome == 'success'
       uses: actions/cache/save@v4
       with:
         path: |-
