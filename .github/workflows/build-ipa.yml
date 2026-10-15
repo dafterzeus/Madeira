@@ -764,6 +764,19 @@ jobs:
         echo "::notice::all 15 linked archives present"
     - name: Stage licence copies
       run: bash build/stage-licenses.sh
+    - name: Make StikJIT interfaces readable by the runner Swift compiler
+      run: |
+        python3 - <<'PYINTERFACE'
+        from pathlib import Path
+        root = Path('app/Frameworks/StikJIT.xcframework/ios-arm64/StikJIT.framework/Modules/StikJIT.swiftmodule')
+        for p in root.glob('*.swiftinterface'):
+            s = p.read_text()
+            # Within its own module, StikJIT::DDIPaths is DDIPaths and
+            # StikJIT::StikJIT.StikJIT::Configuration is StikJIT.Configuration.
+            s = s.replace('StikJIT::', '').replace('::', '.')
+            p.write_text(s)
+            print('Translated module selectors:', p)
+        PYINTERFACE
     - name: Archive (unsigned)
       shell: bash
       run: |
