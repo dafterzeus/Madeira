@@ -3,6 +3,9 @@
 name: Build Madeira main IPA
 'on':
   workflow_dispatch: null
+  push:
+    branches: [gta-build]
+    paths: [.github/workflows/build-ipa.yml]
 concurrency:
   group: madeira-main-ipa
   cancel-in-progress: false
@@ -10,6 +13,7 @@ permissions:
   contents: read
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     timeout-minutes: 360
     defaults:
