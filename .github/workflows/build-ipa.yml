@@ -610,7 +610,7 @@ jobs:
         WANT="concrt140.dll msvcp140.dll msvcp140_1.dll msvcp140_2.dll
               msvcp140_atomic_wait.dll msvcp140_codecvt_ids.dll vcamp140.dll
               vccorlib140.dll vcomp140.dll vcruntime140.dll vcruntime140_1.dll
-              vcruntime140_threads.dll"
+              vcruntime140_threads.dll mfc140.dll mfc140u.dll"
         command -v cabextract >/dev/null 2>&1 || brew install cabextract
         command -v msiextract >/dev/null 2>&1 || brew install msitools
 
@@ -694,14 +694,14 @@ jobs:
           done
           AFTER=$(find /tmp/vcx -type f 2>/dev/null | wc -l | tr -d ' ')
           collect
-          echo "pass $pass: $BEFORE -> $AFTER files, $FOUND of 12 recovered"
-          [ "$FOUND" -eq 12 ] && break
+          echo "pass $pass: $BEFORE -> $AFTER files, $FOUND of 14 recovered"
+          [ "$FOUND" -eq 14 ] && break
           [ "$BEFORE" = "$AFTER" ] && break
         done
 
-        echo "::notice::vcruntime :: recovered $FOUND of 12$([ -n "$MISSING" ] && echo " -- missing:$MISSING")"
+        echo "::notice::vcruntime :: recovered $FOUND of 14$([ -n "$MISSING" ] && echo " -- missing:$MISSING")"
 
-        if [ "$FOUND" -lt 12 ]; then
+        if [ "$FOUND" -lt 14 ]; then
           echo "-- what the installer actually unpacked to (biggest 40) --"
           find /tmp/vcx -type f -size +20k -exec ls -S {} + 2>/dev/null \
             | head -40 | sed "s|/tmp/vcx/||"
@@ -720,7 +720,7 @@ jobs:
         PYEOF
     - name: Require all VC++ runtime DLLs
       shell: bash
-      run: test "$(find app/Madeira/x86_64-vcruntime -name "*.dll" | wc -l | tr -d " ")" = 12
+      run: test "$(find app/Madeira/x86_64-vcruntime -name "*.dll" | wc -l | tr -d " ")" = 14
     - name: Verify all linked archives exist
       shell: bash
       run: |
@@ -782,6 +782,7 @@ jobs:
         ent=plistlib.load(open('app/Madeira/Madeira.entitlements','rb'))
         ent.update({'com.apple.developer.kernel.increased-memory-limit':True,'get-task-allow':True})
         plistlib.dump(ent,open('build-out/signing-entitlements.plist','wb'))
+        plistlib.dump({'get-task-allow':True},open('build-out/helper-entitlements.plist','wb'))
         # Sign nested code before its containers. Do not re-sign Windows PE DLLs.
         for p in sorted(app.rglob('*'),key=lambda p:len(p.parts),reverse=True):
             if p.is_file() and (p.suffix=='.dylib' or '.framework' in str(p)):
@@ -790,7 +791,7 @@ jobs:
                     subprocess.run(['codesign','--force','--sign','-','--timestamp=none',str(p)],check=True)
             if p.is_dir() and p.suffix in ('.framework','.appex'):
                 cmd=['codesign','--force','--sign','-','--timestamp=none']
-                if p.suffix=='.appex':cmd+=['--entitlements','build-out/signing-entitlements.plist']
+                if p.suffix=='.appex':cmd+=['--entitlements','build-out/helper-entitlements.plist']
                 subprocess.run(cmd+[str(p)],check=True)
         subprocess.run(['codesign','--force','--sign','-','--timestamp=none','--entitlements','build-out/signing-entitlements.plist',str(app)],check=True)
         subprocess.run(['codesign','--verify','--deep','--strict','--verbose=2',str(app)],check=True)
