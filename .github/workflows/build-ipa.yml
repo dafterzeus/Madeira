@@ -131,8 +131,8 @@ jobs:
         ../configure --disable-tests > "$GITHUB_WORKSPACE/wine-native-configure.log" 2>&1
         N=$(sysctl -n hw.ncpu)
         # Never fall back to a full Wine build: only host tools and headers are needed.
-        make -j"$N" __tools__ > "$GITHUB_WORKSPACE/wine-native-make.log" 2>&1
-        make -k -j"$N" include >> "$GITHUB_WORKSPACE/wine-native-make.log" 2>&1 || true
+        make -j"$N" tools/widl/widl tools/wrc/wrc tools/wmc/wmc tools/winebuild/winebuild > "$GITHUB_WORKSPACE/wine-native-make.log" 2>&1
+        make -k -j"$N" include/all >> "$GITHUB_WORKSPACE/wine-native-make.log" 2>&1 || true
         test -x tools/widl/widl
     - name: Save native wine tools
       if: steps.winenative.outputs.cache-hit != 'true' && hashFiles('wine/build-native/tools/widl/widl') != ''
@@ -174,7 +174,7 @@ jobs:
     - name: Generate cross-tree headers and patch config.h for iOS SDK
       shell: bash
       run: |
-        make -C wine/build-macos include -j"$(sysctl -n hw.ncpu)" > "$GITHUB_WORKSPACE/make-include.log" 2>&1 || true
+        make -C wine/build-macos include/all -j"$(sysctl -n hw.ncpu)" > "$GITHUB_WORKSPACE/make-include.log" 2>&1 || true
         cp -n wine/build-native/include/*.h wine/build-macos/include/ 2>/dev/null || true
         CFG=wine/build-macos/include/config.h
         {
