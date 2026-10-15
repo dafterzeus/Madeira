@@ -272,6 +272,22 @@ jobs:
     - name: Build FFmpeg iOS
       shell: bash
       run: bash build/ffmpeg/build.sh 2>&1 | tee ffmpeg.log
+    - name: Check SDK support for page-wait diagnostics
+      run: |
+        # This counter was added after the SDK available on macos-15.
+        # Probe the actual struct rather than assuming an Xcode version.
+        if ! printf '#include <sys/resource.h>\nint main(void) { struct rusage_info_v6 r; return (int)r.ri_page_wait_time_mach; }\n' | \
+          xcrun -sdk iphoneos clang -arch arm64 -miphoneos-version-min=17.0 -x c -c -o /tmp/page-wait-probe.o -; then
+          python3 - <<'PYSDK'
+        from pathlib import Path
+        p = Path('build/ntdll-unix/server_ios.c')
+        s = p.read_text()
+        old = 'XP_MS( ru.ri_page_wait_time_mach - pru.ri_page_wait_time_mach )'
+        assert s.count(old) == 1
+        p.write_text(s.replace(old, '0.0 /* page-wait counter unavailable in this SDK */'))
+        PYSDK
+          echo '::notice::Page-wait diagnostic unavailable in this SDK, reported as zero'
+        fi
     - name: Build ntdll-unix
       continue-on-error: true
       run: bash build/ntdll-unix/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/ntdll.log"; exit ${PIPESTATUS[0]}
@@ -491,8 +507,12 @@ jobs:
           -DLLVM_ENABLE_TERMINFO=Off -DLLVM_ENABLE_LIBXML2=Off \
           -DLLVM_ENABLE_ZSTD=Off -DLLVM_ENABLE_ZLIB=Off \
           > "$GITHUB_WORKSPACE/llvm-ios-cfg.log" 2>&1
+        # Build every static library. The default target also links libLTO.dylib
+        # with Linux-only flags, even though Madeira only consumes the archives.
+        STATIC_TARGETS=$(ninja -C toolchains/llvm-ios-build -t targets all | sed -n 's|^\(lib/[^:]*\.a\):.*|\1|p')
+        test -n "$STATIC_TARGETS"
         cmake --build toolchains/llvm-ios-build -j"$(sysctl -n hw.ncpu)" \
-          > "$GITHUB_WORKSPACE/llvm-ios-build.log" 2>&1
+          --target $STATIC_TARGETS > "$GITHUB_WORKSPACE/llvm-ios-build.log" 2>&1
       id: llvmbuild
     - name: Verify LLVM iOS build
       if: always()
@@ -822,6 +842,7 @@ jobs:
       if: failure()
       shell: bash
       run: |-
+        set +e
         for L in ntdll wineserver win32u; do
           if [ -f "$L.log" ]; then
             T=$(grep -E "^(Results:|Failed:|ERROR)" "$L.log" | head -5 | python3 -c "import sys; print('%0A'.join(sys.stdin.read().splitlines()))")
