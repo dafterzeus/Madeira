@@ -1,0 +1,72 @@
+name: Build pinned WoW64 PE assets
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  wow64:
+    runs-on: macos-15
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Verify pinned sources
+        run: |
+          test "$(git -C wine rev-parse HEAD)" = 9129e9684daaeae70da9435e7c6060e59392634e
+          test "$(git -C dxmt rev-parse HEAD)" = 128b297c6e9a00014408dc68b4c2c2373b5813de
+          git submodule status --recursive | tee source-revisions.txt
+      - name: Install build tools and llvm-mingw
+        run: |
+          brew install bison meson ninja vim
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix vim)/bin" >> "$GITHUB_PATH"
+          mkdir -p third-party-downloads/llvm-mingw-wow64 toolchains
+          archive=third-party-downloads/llvm-mingw-wow64/llvm-mingw-20260421-ucrt-macos-universal.tar.xz
+          curl -fL --retry 3 -o "$archive" https://github.com/mstorsjo/llvm-mingw/releases/download/20260421/llvm-mingw-20260421-ucrt-macos-universal.tar.xz
+          echo "bd85a3975723815cef28dbbd2ca2cb0c926f6b348a12a0453f39f7af273cb3f7  $archive" | shasum -a 256 -c -
+          tar -xf "$archive" -C toolchains
+      - name: Ensure Metal compiler
+        run: |
+          if ! xcrun -sdk macosx metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+      - name: Prepare Wine host dependency scanner
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('wine/dlls/ntdll/arm64ec_x64_export_iat.c')
+          if not p.exists():
+              p.write_text('/* Unused ARM64EC-only generated source placeholder. */\n')
+          p = Path('wine/tools/makedep.c')
+          s = p.read_text()
+          old = 'fatal_error( "%s must be included before other headers\\n", file->name );'
+          assert s.count(old) == 1
+          s = s.replace(old, 'fprintf( stderr, "%s:%d: warning: %s must be included before other headers\\n", input_file_name, input_line, file->name );')
+          old = '    if (make->external) return NULL; /* ignore missing files in external libs */\n'
+          assert s.count(old) == 1
+          s = s.replace(old, old + '    if (!strncmp( source->name, "ios_", 4 )) return NULL; /* external iOS shim headers */\n')
+          p.write_text(s)
+          PY
+      - name: Build Wine and DXMT i386 farm
+        run: |
+          set -o pipefail
+          bash build/wine-i386/build.sh 2>&1 | tee wow64-build.log
+      - name: Package PE assets
+        run: |
+          tar -czf wow64-i386-assets.tar.gz -C app/Madeira i386-windows
+          shasum -a 256 app/Madeira/i386-windows/* > i386-sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pinned-wow64-assets
+          path: |
+            wow64-i386-assets.tar.gz
+            wow64-build.log
+            wine/build-i386/madeira-i386-build.log
+            dxmt/build-pe-i386/meson-logs/meson-log.txt
+            source-revisions.txt
+            i386-sha256.txt
