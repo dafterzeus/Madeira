@@ -13,11 +13,19 @@
 # options (and its generator): remove $B to configure it again with these.
 set -eu
 R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-export PATH="$R/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin:$PATH"
-B="$R/FEX/build-arm64ec"
+MINGW="${LLVM_MINGW:-$R/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin}"
+export PATH="$MINGW:$PATH"
+# Build a patched source copy, leaving both submodule pins and worktrees intact.
+B="$R/FEX/build-madeira-arm64ec"
+S="$B/src"
+bash "$R/build/fex-arm64ec/prepare-source.sh" "$S"
+FEX_HASH="$(git -C "$R/FEX" rev-parse HEAD)"
+FEX_VERSION="$(git -C "$R/FEX" describe --abbrev=7 2>/dev/null || true)"
 if [ ! -f "$B/CMakeCache.txt" ]; then
-    cmake -S "$R/FEX" -B "$B" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_TOOLCHAIN_FILE="$R/FEX/Data/CMake/toolchain_mingw.cmake" \
+    cmake -S "$S" -B "$B" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_TOOLCHAIN_FILE="$S/Data/CMake/toolchain_mingw.cmake" \
+        -DCMAKE_DISABLE_FIND_PACKAGE_fmt=ON \
+        -DOVERRIDE_HASH="$FEX_HASH" -DOVERRIDE_VERSION="$FEX_VERSION" \
         -DMINGW_TRIPLE=arm64ec-w64-mingw32 -DTUNE_CPU=cortex-a78 \
         -DFEX_IOS_HOST_BUILD=ON -DCMAKE_C_FLAGS=-DFEX_IOS_HOST=1 \
         -DCMAKE_CXX_FLAGS=-DFEX_IOS_HOST=1 -DCMAKE_ASM_FLAGS=-DFEX_IOS_HOST=1 \

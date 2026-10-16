@@ -1,0 +1,99 @@
+--- a/External/rpmalloc/rpmalloc/rpmalloc.c
++++ b/External/rpmalloc/rpmalloc/rpmalloc.c
+@@ -178,15 +178,16 @@
+ #define SMALL_PAGE_SIZE_SHIFT 16
+ #define SMALL_PAGE_SIZE (1 << SMALL_PAGE_SIZE_SHIFT)
+ #define SMALL_PAGE_MASK (~((uintptr_t)SMALL_PAGE_SIZE - 1))
++#ifdef FEX_IOS_HOST
++// Two maximum-sized medium blocks no longer fit, but one still does.
++#define MEDIUM_PAGE_SIZE_SHIFT 19
++#else
+ #define MEDIUM_PAGE_SIZE_SHIFT 22
++#endif
+ #define MEDIUM_PAGE_SIZE (1 << MEDIUM_PAGE_SIZE_SHIFT)
+ #define MEDIUM_PAGE_MASK (~((uintptr_t)MEDIUM_PAGE_SIZE - 1))
+ #ifdef FEX_IOS_HOST
+-/* iOS-Mythic ml436 (#73): dropped 26 -> 24 to legalise 16MB spans (see the
+- * SPAN_SIZE note below). Large-class ceiling falls 64MB -> 16MB; blocks in
+- * (16MB, 64MB] shift to the huge path, which maps them at exact size — a VA
+- * IMPROVEMENT over carving them from a 64MB span. */
+-#define LARGE_PAGE_SIZE_SHIFT 24
++#define LARGE_PAGE_SIZE_SHIFT 21
+ #else
+ #define LARGE_PAGE_SIZE_SHIFT 26
+ #endif
+@@ -194,28 +195,19 @@
+ #define LARGE_PAGE_MASK (~((uintptr_t)LARGE_PAGE_SIZE - 1))
+ 
+ #ifdef FEX_IOS_HOST
+-/* iOS-Mythic ml332: 256MB spans are unaffordable in a 39-bit shared address space.
+- *
+- * os_mmap reserves size+alignment, so every span costs 512MB of VA, and rpmalloc's
+- * per-thread heaps map one span per page type -- ml330 measured 69 spans / 35GB
+- * reserved (~1% committed) inside the same 64GB window that CEF's PartitionAlloc
+- * needs, until FEXCore CreateThread's aligned_alloc returned NULL (#43). Releasing
+- * dead threads' spans is NOT the fix: the heap is shared across threads, and doing
+- * so corrupted live containers (#54, ml329/ml331).
+- *
+- * 64MB is the floor (SPAN_SIZE / LARGE_PAGE_SIZE must be >= 1; LARGE_PAGE_SIZE_SHIFT
+- * is 26) and cuts per-span VA 4x to 128MB. SPAN_MASK derives, span lookup arithmetic
+- * is unchanged. */
+-/* iOS-Mythic ml436 (#73): 64MB -> 16MB, paired with LARGE_PAGE_SIZE_SHIFT 26 -> 24
+- * above to keep SPAN_SIZE / LARGE_PAGE_SIZE >= 1. ml435's [span-census] proved the
+- * FEX band fills by LIVE DEMAND, not leaks: 74 live guest threads x ~200MB
+- * (2-3 x 64MB spans + code buffers) ~= the whole 16GB band, code-buffer allocation
+- * then fails and Crashpad kills the webhelper AFTER BrowserReady. 16MB spans cut
+- * the per-thread span footprint 4x (~48MB worst case); with the ml389 VA diet and
+- * db 5392 exact-aligned maps this puts 74 threads at ~3.5GB. Exit-leak (12 heaps,
+- * ~2GB) is secondary and partially covered by the ml435 ThreadTerm hardening. */
+-static const char ios_span16_marker[] __attribute__((used)) = "rpmalloc-span16 rev=ml436";
+-#define SPAN_SIZE (16 * 1024 * 1024)
++/* All Wine processes share this address space on iOS. A lightly used heap
++ * previously reserved up to three 16 MiB spans, fragmenting the 12 GiB host
++ * band before its live allocations filled it. Use 2 MiB spans, containing
++ * 32 small pages, four medium pages, or one large page. Keep the existing
++ * heap ownership and deferred-free rules: other threads can still hold blocks.
++ * Larger size classes must use the exact-size huge path (get_size_class).
++ * Huge maps retain span alignment for block_get_span() and aligned frees. */
++static const char ios_span2_marker[] __attribute__((used)) = "rpmalloc-span2 rev=madeira-fexalloc";
++#define SPAN_SIZE (2 * 1024 * 1024)
++_Static_assert(SPAN_SIZE >= MEDIUM_PAGE_SIZE && SPAN_SIZE >= LARGE_PAGE_SIZE,
++               "Every page type must fit in a span");
++_Static_assert(MEDIUM_PAGE_SIZE > MEDIUM_BLOCK_SIZE_LIMIT + PAGE_HEADER_SIZE,
++               "Medium classes must fit with their page header");
+ #else
+ #define SPAN_SIZE (256 * 1024 * 1024)
+ #endif
+@@ -814,6 +806,12 @@
+ 	                "Size class misconfiguration");
+ 	rpmalloc_assert((class_idx >= SIZE_CLASS_COUNT) || (global_size_class[class_idx - 1].block_size < size),
+ 	                "Size class misconfiguration");
++#ifdef FEX_IOS_HOST
++	// Rounding up can select a class larger than the page payload (e.g.
++	// 1792 KiB + 1 rounds to 2 MiB). Never hand out a zero-block page.
++	if ((class_idx < SIZE_CLASS_COUNT) && !global_size_class[class_idx].block_count)
++		return SIZE_CLASS_COUNT;
++#endif
+ 	return class_idx;
+ }
+ 
+@@ -2959,9 +2957,19 @@
+ 		} else {
+ 			// Huge block
+ 			void* block_start = pointer_offset(span, SPAN_HEADER_SIZE);
++#ifdef FEX_IOS_HOST
++			// More sizes use huge maps with 2 MiB spans. Reuse their existing
++			// capacity on small growth/shrink, but release a substantially
++			// shrunken map. The old >8 MiB test copied on every byte of growth
++			// below that threshold. Account for aligned-pointer padding too.
++			if (!old_size)
++				old_size = ((size_t)span->page_size * (size_t)span->page_count) - (size_t)pointer_diff(block, span);
++			if ((size <= old_size) && (size >= (old_size / 2))) {
++#else
+ 			if (!old_size)
+ 				old_size = ((size_t)span->page_size * (size_t)span->page_count) - SPAN_HEADER_SIZE;
+ 			if ((size < old_size) && (size > LARGE_BLOCK_SIZE_LIMIT)) {
++#endif
+ 				// Still fits in block and still huge, never mind trying to save memory,
+ 				// but preserve data if alignment changed
+ 				if ((block_start != block) && !(flags & RPMALLOC_NO_PRESERVE))
