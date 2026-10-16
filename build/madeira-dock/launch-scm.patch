@@ -1,0 +1,45 @@
+--- a/src/scm.c
++++ b/src/scm.c
+@@ -171,6 +171,18 @@
+     return GetEnvironmentVariableW(name, value, 4) == 1 && value[0] == expected;
+ }
+
++void sh_launch_scm_prepare(const struct sh_observer *o)
++{
++    if (wide_flag(L"MADEIRA_DOCK_LAUNCH_SCM", L'0')) return;
++    SC_HANDLE manager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
++    DWORD error = manager ? 0 : GetLastError();
++    if (!manager && !manager_process && sh_scm_error_means_absent(error))
++        error = start_manager(o, &manager, "launch-scm-started");
++    o->event("launch-scm", manager != NULL);
++    if (!manager) o->event("launch-scm-error", (int32_t)error);
++    if (manager) CloseServiceHandle(manager);
++}
++
+ int32_t sh_ceg_scm_prepare(const struct sh_observer *o, HMODULE client)
+ {
+     SC_HANDLE manager = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
+--- a/src/scm.h
++++ b/src/scm.h
+@@ -5,6 +5,11 @@
+ #define MADEIRA_STEAM_HOST_SCM_H
+ #include <windows.h>
+ #include "probe.h"
++/* Before every game launch: make Wine's service manager reachable within the
++ * existing 30 s startup bound. Log failure and continue. A manager this host
++ * starts is owned until sh_ceg_scm_release. MADEIRA_DOCK_LAUNCH_SCM=0: no-op.
++ */
++void sh_launch_scm_prepare(const struct sh_observer *o);
+ /* ml2000: make Wine's service manager reachable for Valve's client and check
+  * (read-only) that Valve's own client service is registered. If it is not,
+  * run Valve's own bin\SteamService.exe /install from the folder of the loaded
+--- a/src/launch.c
++++ b/src/launch.c
+@@ -239,6 +239,7 @@
+         !publish(&values[1], (DWORD)steamid) || !publish(&values[2], GetCurrentProcessId())) goto done;
+     o->event("launch-client-discovery-published", 1);
+     SetConsoleCtrlHandler(on_control, TRUE);
++    sh_launch_scm_prepare(o);
+     uint64_t gameid = appid;
+     uint64_t call = ((launch_fn)(*(void ***)manager)[2])(manager, &gameid, launch_option, 0, "");
+     o->event("launch-request-submitted", call != 0);

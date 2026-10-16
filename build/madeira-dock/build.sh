@@ -33,12 +33,16 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Keep the fork's Dock change here without changing the upstream submodule pin.
+cp -R "$SRC/src" "$TMP/src"
+patch -d "$TMP" -p1 < "$DIR/launch-scm.patch"
+
 # Same flags as Dock's own tools/build.sh: warnings are errors, the runtime is
 # linked statically (its notices go into dock-notices.txt) and symbols are
 # stripped. -Wl,--no-insert-timestamp keeps the output reproducible.
 "$CC" -std=c11 -O2 -Wall -Wextra -Werror -Wno-cast-function-type \
     -static -Wl,--strip-all -Wl,--no-insert-timestamp \
-    -o "$TMP/dockhost.exe" "$SRC"/src/*.c -ladvapi32
+    -o "$TMP/dockhost.exe" "$TMP"/src/*.c -ladvapi32
 
 section() { printf '\n\n==== %s ====\n\n' "$1"; }
 {
