@@ -7,8 +7,10 @@ set -eu
 
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
-DXMT_SRC="$REPO_ROOT/dxmt/src"
-DXMT_ROOT="$REPO_ROOT/dxmt"
+# Like the Dock and FEX patches, build a patched copy of the pinned submodule.
+DXMT_ROOT="$BUILD_DIR/src"
+bash "$BUILD_DIR/prepare-source.sh" "$DXMT_ROOT"
+DXMT_SRC="$DXMT_ROOT/src"
 LLVM_SRC="$REPO_ROOT/toolchains/llvm-project/llvm"
 LLVM_BUILD="$REPO_ROOT/toolchains/llvm-ios-build"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
@@ -227,7 +229,7 @@ echo "=== MADEIRA: dxmt_madeira_native -- generated headers ==="
 # meson produces version.h with vcs_tag (meson.build:176-180); dxmt_info.cpp
 # is the only consumer.  Same content, same `git describe --always`.
 mkdir -p "$BUILD_DIR/shader-headers"
-sed "s/@VCS_TAG@/$(git -C "$DXMT_ROOT" describe --always 2>/dev/null || echo unknown)/" \
+sed "s/@VCS_TAG@/$(git -C "$REPO_ROOT/dxmt" describe --always 2>/dev/null || echo unknown)/" \
     "$DXMT_ROOT/version.h.in" > "$BUILD_DIR/shader-headers/version.h"
 echo "  version.h                                OK"
 

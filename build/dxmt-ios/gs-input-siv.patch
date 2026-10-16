@@ -1,0 +1,111 @@
+--- a/src/airconv/dxbc_signature.cpp
++++ b/src/airconv/dxbc_signature.cpp
+@@ -1,4 +1,6 @@
+ #include "dxbc_converter.hpp"
++#include <atomic>
++#include <cstdio>
+ #include <format>
+ 
+ using namespace microsoft;
+@@ -1032,26 +1034,49 @@
+     return Signature();
+   };
+ 
++  auto fail_input = [&](D3D10_SB_NAME semantic) {
++    const auto &operand = Inst.m_Operands[0];
++    auto reg = operand.m_Index[operand.m_IndexDimension == D3D10_SB_OPERAND_INDEX_2D ? 1 : 0].m_RegIndex;
++    sm50_shader->signature_error = std::format(
++        "Unsupported geometry shader input: opcode {}, semantic {}, register {}, mask {:#x}",
++        uint32_t(Inst.m_OpCode), uint32_t(semantic), reg, operand.m_WriteMask >> 4
++    );
++  };
++
+   switch (Inst.m_OpCode) {
+   case D3D10_SB_OPCODE_DCL_INPUT_SGV: {
+-    // auto mask = Inst.m_Operands[0].m_WriteMask >> 4;
+-    // auto MinPrecision = Inst.m_Operands[0].m_MinPrecision; // not used
+-    auto sgv = Inst.m_InputDeclSGV.Name;
+-    switch (sgv) {
+-    default:
+-      assert(0 && "Unexpected/unhandled geometry shader sgv");
+-      break;
+-    }
++    fail_input(Inst.m_InputDeclSGV.Name);
+     break;
+   }
+   case D3D10_SB_OPCODE_DCL_INPUT_SIV: {
+     D3D10_SB_NAME siv = Inst.m_InputDeclSIV.Name;
++    const auto &operand = Inst.m_Operands[0];
++    if (operand.m_Type != D3D10_SB_OPERAND_TYPE_INPUT ||
++        operand.m_IndexDimension != D3D10_SB_OPERAND_INDEX_2D) {
++      fail_input(siv);
++      break;
++    }
+ 
+     switch (siv) {
+     case D3D10_SB_NAME_POSITION:
+-      break;
+-    default:
+-      assert(0 && "Unexpected/unhandled geometry shader siv");
++    case D3D10_SB_NAME_CULL_DISTANCE:
++    case D3D10_SB_NAME_CLIP_DISTANCE:
++    case D3D10_SB_NAME_RENDER_TARGET_ARRAY_INDEX:
++    case D3D10_SB_NAME_VIEWPORT_ARRAY_INDEX: {
++      // The vertex stage writes raw output registers to the GS payload.
++      // load_vertex copies all four components, including packed system values.
++      static std::atomic_uint32_t logged_sivs = 0;
++      auto bit = 1u << uint32_t(siv);
++      if (!(logged_sivs.fetch_or(bit, std::memory_order_relaxed) & bit)) {
++        std::fprintf(
++            stderr, "dxmt: GS dcl_input_siv semantic=%u register=%u mask=%#x\n",
++            uint32_t(siv), operand.m_Index[1].m_RegIndex, operand.m_WriteMask >> 4
++        );
++      }
++      break;
++    }
++    default:
++      fail_input(siv);
+       break;
+     }
+     break;
+--- a/src/airconv/dxbc_converter.hpp
++++ b/src/airconv/dxbc_converter.hpp
+@@ -422,6 +422,7 @@
+   dxmt::dxbc::ShaderInfo shader_info;
+   dxmt::air::FunctionSignatureBuilder func_signature;
+   std::vector<Signature> output_signature;
++  std::string signature_error;
+   std::vector<std::unique_ptr<BasicBlock>> bbs;
+   std::vector<std::function<void(SignatureContext &)>> signature_handlers;
+   /* SM50Initialize drops bbs and signature_handlers and keeps the bytecode;
+--- a/src/airconv/dxbc_converter_cfg.cpp
++++ b/src/airconv/dxbc_converter_cfg.cpp
+@@ -557,6 +557,8 @@
+     case D3D10_SB_OPCODE_DCL_OUTPUT_SIV:
+     case D3D10_SB_OPCODE_DCL_OUTPUT: {
+       handle_signature(inputParser, outputParser, Inst, sm50_shader, phase);
++      if (!sm50_shader->signature_error.empty())
++        return {};
+       break;
+     }
+     case D3D10_SB_OPCODE_CUSTOMDATA: {
+--- a/src/airconv/dxbc_converter.cpp
++++ b/src/airconv/dxbc_converter.cpp
+@@ -1111,6 +1111,17 @@
+   }
+ 
+   sm50_shader->bbs = read_control_flow(CodeParser, sm50_shader, inputParser, outputParser);
++  if (!sm50_shader->signature_error.empty()) {
++    errorOut << sm50_shader->signature_error << '\0';
++    if (ppError)
++      *ppError = (sm50_error_t)errorObj;
++    else
++      delete errorObj;
++    delete sm50_shader;
++    *ppShader = nullptr;
++    return 1;
++  }
++
+ 
+   auto &binding_table = shader_info->binding_table;
+   auto &binding_table_cbuffer = shader_info->binding_table_cbuffer;

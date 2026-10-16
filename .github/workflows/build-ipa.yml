@@ -802,6 +802,18 @@ jobs:
             "$GITHUB_WORKSPACE/archive.log" | cut -c1-200 | head -15
         fi
         exit "$rc"
+    - name: Verify GS input fix in archived executable
+      run: |
+        APP=build-out/Madeira.xcarchive/Products/Applications/Madeira.app/Madeira
+        strings -a "$APP" > build-out/app-strings.txt
+        grep -F 'dxmt: GS dcl_input_siv semantic=%u register=%u mask=%#x' build-out/app-strings.txt
+        grep -F 'Unsupported geometry shader input: opcode' build-out/app-strings.txt
+        if grep -F 'Unexpected/unhandled geometry shader siv' build-out/app-strings.txt; then
+          echo '::error::Unpatched GS translator is still linked into Madeira'
+          exit 1
+        fi
+        # The Windows DLLs contain only airconv thunks; the converter is static.
+        xcrun nm "$APP" | grep ' T _SM50Initialize$'
     - name: Sign app with reference and current entitlements and package IPA
       shell: bash
       run: |-
